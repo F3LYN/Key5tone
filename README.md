@@ -1,7 +1,9 @@
 # ⌨️ Key5tone
 
 A scalable keystroke and mouse input visualizer for Windows. Built with C++ and Direct2D, this overlay captures global inputs and renders them as crisp vector graphics (SVG) to be used for OBS or other apps. 
+
 <img width="443" height="218" alt="image" src="https://github.com/user-attachments/assets/e57d78c3-5049-458c-9f0e-3560f26a443c" />
+
 
 Perfect for streamers, tutorial creators, and speedrunners who want to display their inputs in real-time without losing image quality when scaling.
 
