@@ -23,35 +23,36 @@ LRESULT CALLBACK KeyboardProcess(int nCode, WPARAM wParam, LPARAM lParam) {
 		KBDLLHOOKSTRUCT* keyInfo = (KBDLLHOOKSTRUCT*)lParam;
 		int keyCode = (int)keyInfo->vkCode;
 
-		// 3. THE FIX: If this key is the exact same as the last one we processed, 
-		// it's an auto-repeat ghost! Ignore it.
 		if (keyCode == lastKeyCode) {
 			return CallNextHookEx(NULL, nCode, wParam, lParam);
 		}
 		lastKeyCode = keyCode; // Update our memory
 
-		gBtnLabel = "";
+		// --- Ignore the modifier if it IS the key we just pressed! ---
+		std::string prefix = "";
+		if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) && keyCode != VK_LCONTROL && keyCode != VK_RCONTROL && keyCode != VK_CONTROL) {
+			prefix += "CTRL + ";
+		}
+		if ((GetAsyncKeyState(VK_MENU) & 0x8000) && keyCode != VK_LMENU && keyCode != VK_RMENU && keyCode != VK_MENU) {
+			prefix += "ALT + ";
+		}
+		if ((GetAsyncKeyState(VK_SHIFT) & 0x8000) && keyCode != VK_LSHIFT && keyCode != VK_RSHIFT && keyCode != VK_SHIFT) {
+			prefix += "SHIFT + ";
+		}
 
+		gBtnLabel = "";
 		std::string specialKey = GetSpecialKeyName(keyCode);
 
 		if (!specialKey.empty()) {
-			gBtnLabel = specialKey;
+			gBtnLabel = prefix + specialKey;
 		}
 		else {
 			char keyChar = (char)MapVirtualKeyA(keyCode, MAPVK_VK_TO_CHAR);
-			gBtnLabel += keyChar;
-
-			// Check modifiers before adding the key name
-			std::string prefix = "";
-			if (GetAsyncKeyState(VK_CONTROL) & 0x8000) prefix += "CTRL + ";
-			if (GetAsyncKeyState(VK_MENU) & 0x8000)    prefix += "ALT + ";
-			if (GetAsyncKeyState(VK_SHIFT) & 0x8000)   prefix += "SHIFT + ";
-
-			gBtnLabel = prefix + (specialKey.empty() ? std::string(1, keyChar) : specialKey);
+			gBtnLabel = prefix + std::string(1, keyChar);
 		}
 
 		// sets the timer to clear the keys
-		SetTimer(g_hwndOverlay, 1, 2000, NULL);
+		SetTimer(g_hwndOverlay, 1, 1000, NULL);
 
 		InvalidateRect(g_hwndOverlay, NULL, FALSE);
 

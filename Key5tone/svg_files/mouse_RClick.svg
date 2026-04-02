@@ -2,9 +2,9 @@
 <!-- Created with Inkscape (http://www.inkscape.org/) -->
 
 <svg
-   width="60"
-   height="100"
-   viewBox="0 0 60 100"
+   width="90"
+   height="90"
+   viewBox="0 0 90 90"
    version="1.1"
    id="svg1"
    inkscape:version="1.4.2 (f4327f4, 2025-05-13)"
@@ -25,8 +25,8 @@
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="px"
      inkscape:zoom="11.313708"
-     inkscape:cx="96.608465"
-     inkscape:cy="54.182058"
+     inkscape:cx="96.608468"
+     inkscape:cy="54.182059"
      inkscape:window-width="3840"
      inkscape:window-height="2066"
      inkscape:window-x="3829"
@@ -37,10 +37,10 @@
      id="defs1">
     <inkscape:perspective
        sodipodi:type="inkscape:persp3d"
-       inkscape:vp_x="0 : 85.82857 : 1"
+       inkscape:vp_x="0 : 75.82857 : 1"
        inkscape:vp_y="0 : 1000 : 0"
-       inkscape:vp_z="32 : 84.28683 : 1"
-       inkscape:persp3d-origin="16 : 78.66667 : 1"
+       inkscape:vp_z="32 : 74.28683 : 1"
+       inkscape:persp3d-origin="16 : 68.66667 : 1"
        id="perspective42" />
     <linearGradient
        id="linearGradient34"
@@ -64,7 +64,7 @@
        fy="16"
        r="15.999999"
        gradientUnits="userSpaceOnUse"
-       gradientTransform="matrix(4.6996869e-7,4.8583985,-4.9420334,4.3025103e-7,109.07253,-27.73433)" />
+       gradientTransform="matrix(4.2297182e-7,4.3725586,-4.4478301,3.8722593e-7,116.61528,-24.960897)" />
   </defs>
   <g
      inkscape:label="Layer 1"
@@ -72,31 +72,31 @@
      id="layer1"
      style="display:inline">
     <rect
-       style="display:inline;fill:url(#radialGradient52);fill-opacity:1;stroke-width:2.42062"
+       style="display:inline;fill:url(#radialGradient52);fill-opacity:1;stroke-width:2.17856"
        id="rect35"
-       width="60"
-       height="100"
-       x="0"
+       width="54"
+       height="90"
+       x="18.450003"
        y="0"
-       ry="30"
+       ry="27"
        inkscape:label="BOTTOM_1" />
     <path
-       style="fill:#333333;stroke-width:1.32508"
-       d="M 2,42 H 27 V 2 C 27,2 2,3.9811473 2,42 Z"
+       style="fill:#333333;stroke-width:1.19257"
+       d="m 20.250002,37.8 h 22.5 v -36 c 0,0 -22.5,1.7830326 -22.5,36 z"
        id="path1"
        sodipodi:nodetypes="cccc" />
     <path
-       style="display:inline;fill:#ffffff;stroke-width:1.35133"
-       d="M 58,42 H 32 V 2 c 0,0 26,1.981147 26,40 z"
+       style="display:inline;fill:#ffffff;stroke-width:1.2162"
+       d="m 70.650002,37.8 h -23.4 v -36 c 0,0 23.4,1.7830323 23.4,36 z"
        id="path1-8"
        sodipodi:nodetypes="cccc" />
     <rect
-       style="fill:#333333"
+       style="fill:#333333;stroke-width:0.9"
        id="rect1"
-       width="5"
-       height="22.804193"
-       x="27"
-       y="10.597903"
-       ry="2.5" />
+       width="4.5"
+       height="20.523773"
+       x="42.75"
+       y="9.5381126"
+       ry="2.25" />
   </g>
 </svg>

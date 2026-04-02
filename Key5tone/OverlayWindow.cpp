@@ -1,9 +1,10 @@
 /* OverlayWindow.cpp */
 #include <algorithm>
-#include <iostream>  // library to print text to the screen
+#include <iostream>
 #define NOMINMAX
-#include <windows.h> // windows API
-#include <string> // string library
+#include <windows.h>
+#include <commdlg.h> 
+#include <string> 
 #include <vector>
 #include <dwrite.h>
 #include <d2d1effects.h>
@@ -13,21 +14,34 @@
 
 #pragma comment(lib, "dxguid.lib")
 #pragma comment(lib, "dwrite.lib")
-
+#pragma comment(lib, "Comdlg32.lib")
 
 ID2D1Factory1* pFactory = NULL;
-ID3D11Device* pD3DDevice = NULL; // 3D Hardware Engine
-IDXGISwapChain1* pSwapChain = NULL; // Allows to push the frames to the window
+ID3D11Device* pD3DDevice = NULL;
+IDXGISwapChain1* pSwapChain = NULL;
 ID2D1DeviceContext5* pContext = NULL;
 IDWriteFactory* pDWriteFactory = NULL;
 ID2D1SolidColorBrush* pTextBrush = NULL;
-ID2D1SolidColorBrush* pGlowBrush = NULL; // the glowing effect var
-ID2D1Effect* pShapeGlowEffect = NULL;
+ID2D1SolidColorBrush* pGlowBrush = NULL;
 
-// --- GLOBAL VARIABLE FOR RESIZING
-float gAppScale = 1.0f; // tracks the windows scale (1.0 = normal)
-bool g_isResizing = false; // tracks if the user is currently resizing the window
+ID2D1Effect* pDilateEffect = NULL;
+ID2D1Effect* pColorEffect = NULL;
 
+// --- GLOBAL VARIABLES ---
+float gAppScale = 1.0f;
+bool g_isResizing = false;
+float g_outlineThickness = 1.8f;
+bool g_useWireframe = false; // Toggle for wireframe boxes instead of SVGs
+
+D2D1_COLOR_F g_outlineColor = D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f);
+D2D1_COLOR_F g_bgColor = D2D1::ColorF(0.1f, 1.0f, 0.1f, 1.0f);
+D2D1_COLOR_F g_textColor = D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f);
+
+COLORREF g_customColors[16] = { 0 };
+
+// Trackers for our unified Settings Window
+HWND g_hSettingsWnd = NULL;
+HWND g_hThicknessEdit = NULL;
 
 // buttons
 ID2D1SvgDocument* pSvgNormal = NULL;
@@ -49,27 +63,19 @@ ID2D1SvgDocument* pSvgScrDwn = NULL;
 
 
 void InitGraphics(HWND hwnd) {
-	// 1. Create the D2D Factory (Upgraded to Factory1)
 	D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &pFactory);
-
-	// 2. Create the 3D Hardware Engine
 	D3D11CreateDevice(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, D3D11_CREATE_DEVICE_BGRA_SUPPORT, NULL, 0, D3D11_SDK_VERSION, &pD3DDevice, NULL, NULL);
 
-	// 3. Connect the 3D Engine to the 2D Factory to create our Context (Canvas)
 	IDXGIDevice* pDXGIDevice;
 	pD3DDevice->QueryInterface(__uuidof(IDXGIDevice), (void**)&pDXGIDevice);
 	ID2D1Device* pD2DDevice;
 	pFactory->CreateDevice(pDXGIDevice, &pD2DDevice);
 
-	// create basic canvas
 	ID2D1DeviceContext* pTempContext = NULL;
 	pD2DDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &pTempContext);
-
-	// Upgrade into the global pContext variable
 	pTempContext->QueryInterface(__uuidof(ID2D1DeviceContext5), (void**)&pContext);
 	pTempContext->Release();
 
-	// 4. Create the SwapChain (The delivery truck to the window)
 	IDXGIAdapter* pAdapter;
 	pDXGIDevice->GetAdapter(&pAdapter);
 	IDXGIFactory2* pDXGIFactory;
@@ -89,7 +95,6 @@ void InitGraphics(HWND hwnd) {
 
 	pDXGIFactory->CreateSwapChainForHwnd(pD3DDevice, hwnd, &swapDesc, NULL, NULL, &pSwapChain);
 
-	// 5. Connect the Canvas to the SwapChain
 	IDXGISurface* pBackBuffer;
 	pSwapChain->GetBuffer(0, __uuidof(IDXGISurface), (void**)&pBackBuffer);
 
@@ -101,80 +106,215 @@ void InitGraphics(HWND hwnd) {
 	pContext->CreateBitmapFromDxgiSurface(pBackBuffer, &bitmapProperties, &pTargetBitmap);
 	pContext->SetTarget(pTargetBitmap);
 
-	// clean up pointers
 	pTargetBitmap->Release();
 	pBackBuffer->Release();
 
-	pSvgNormal = LoadSVG(L"svg_files\\reg_key_btn.svg"); // Dimensions: 90 x 90
-	pSvgSpace = LoadSVG(L"svg_files\\space_key_btn.svg"); // Dimensions: 400 x 90 
-	pSvgEnter = LoadSVG(L"svg_files\\enter_key_btn.svg"); // Dimensions: 200 x 90
-	pSvgShift = LoadSVG(L"svg_files\\shift_key_btn.svg"); // Dimensions: 220 x 90
-	pSvgBackSpace= LoadSVG(L"svg_files\\bcksp_key_btn.svg"); // Dimensions: 180 x 90
-	pSvgCaps = LoadSVG(L"svg_files\\caps_key_btn.svg"); // Dimensions: 140 x 90
-	pSvgTab = LoadSVG(L"svg_files\\tab_key_btn.svg"); // Dimensions: 120 x 90
-	pSvgNumpadTall = LoadSVG(L"svg_files\\nmpTL_key_btn.svg"); // Dimensions: 90 x 200
-	pSvgNumpadWide = LoadSVG(L"svg_files\\nmpWD_key_btn.svg"); // Dimensions: 200 x 90
-	pSvgNumpadWide = LoadSVG(L"svg_files\\nmpWD_key_btn.svg"); // Dimensions: 200 x 90
-	pSvgNumpadWide = LoadSVG(L"svg_files\\nmpWD_key_btn.svg"); // Dimensions: 200 x 90
+	pSvgNormal = LoadSVG(L"svg_files\\reg_key_btn.svg");
+	pSvgSpace = LoadSVG(L"svg_files\\space_key_btn.svg");
+	pSvgEnter = LoadSVG(L"svg_files\\enter_key_btn.svg");
+	pSvgShift = LoadSVG(L"svg_files\\shift_key_btn.svg");
+	pSvgBackSpace = LoadSVG(L"svg_files\\bcksp_key_btn.svg");
+	pSvgCaps = LoadSVG(L"svg_files\\caps_key_btn.svg");
+	pSvgTab = LoadSVG(L"svg_files\\tab_key_btn.svg");
+	pSvgNumpadTall = LoadSVG(L"svg_files\\nmpTL_key_btn.svg");
+	pSvgNumpadWide = LoadSVG(L"svg_files\\nmpWD_key_btn.svg");
 
-	pSvgRClick = LoadSVG(L"svg_files\\mouse_RClick.svg"); // Dimensions: 200 x 90
-	pSvgLClick = LoadSVG(L"svg_files\\mouse_LClick.svg"); // Dimensions: 200 x 90
-	pSvgMClick = LoadSVG(L"svg_files\\mouse_MClick.svg"); // Dimensions: 200 x 90
-	pSvgScrUP = LoadSVG(L"svg_files\\mouse_ScrollUP.svg"); // Dimensions: 200 x 90
-	pSvgScrDwn = LoadSVG(L"svg_files\\mouse_ScrollDOWN.svg"); // Dimensions: 200 x 90
+	pSvgRClick = LoadSVG(L"svg_files\\mouse_RClick.svg");
+	pSvgLClick = LoadSVG(L"svg_files\\mouse_LClick.svg");
+	pSvgMClick = LoadSVG(L"svg_files\\mouse_MClick.svg");
+	pSvgScrUP = LoadSVG(L"svg_files\\mouse_ScrollUP.svg");
+	pSvgScrDwn = LoadSVG(L"svg_files\\mouse_ScrollDOWN.svg");
 
-	// 1. Create the Text Factory
 	DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(&pDWriteFactory));
 
+	// Create brushes
+	pContext->CreateSolidColorBrush(g_textColor, &pTextBrush);
+	pContext->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f), &pGlowBrush); // Used as a solid stencil
 
-	// 4. Create a pure white brush for the text paint
-	pContext->CreateSolidColorBrush(D2D1::ColorF(0.0f, 0.0f, 1.0f, 1.0f), &pTextBrush);
-
-	pContext->CreateSolidColorBrush(D2D1::ColorF(1.f, 1.0f, 1.0f, 1.0f), &pGlowBrush);
-
-	// Create the Shadow effect and configure it as an outline!
-	pContext->CreateEffect(CLSID_D2D1Shadow, &pShapeGlowEffect);
-	pShapeGlowEffect->SetValue(D2D1_SHADOW_PROP_BLUR_STANDARD_DEVIATION, 2.5f); // How wide the outline spreads
-	pShapeGlowEffect->SetValue(D2D1_SHADOW_PROP_COLOR, D2D1::Vector4F(1.0f, 1.0f, 1.0f, 80.0f)); // white
-
+	// Create Solid Outline Effects
+	pContext->CreateEffect(CLSID_D2D1Morphology, &pDilateEffect);
+	pDilateEffect->SetValue(D2D1_MORPHOLOGY_PROP_MODE, D2D1_MORPHOLOGY_MODE_DILATE);
+	pContext->CreateEffect(CLSID_D2D1ColorMatrix, &pColorEffect);
 }
 
-LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
+/* ---------------- FUNCTION TO OPEN WINDOWS COLOR PICKER ---------------- */
+bool OpenColorPicker(HWND hwnd, D2D1_COLOR_F& colorOut) {
+	CHOOSECOLOR cc = { 0 };
+	cc.lStructSize = sizeof(cc);
+	cc.hwndOwner = hwnd;
+	cc.lpCustColors = g_customColors;
+
+	cc.rgbResult = RGB(
+		(BYTE)(colorOut.r * 255.0f),
+		(BYTE)(colorOut.g * 255.0f),
+		(BYTE)(colorOut.b * 255.0f)
+	);
+
+	cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+
+	if (ChooseColor(&cc)) {
+		colorOut.r = GetRValue(cc.rgbResult) / 255.0f;
+		colorOut.g = GetGValue(cc.rgbResult) / 255.0f;
+		colorOut.b = GetBValue(cc.rgbResult) / 255.0f;
+		colorOut.a = 1.0f;
+		return true;
+	}
+	return false;
+}
+
+
+/* ---------------- FUNCTION TO HANDLE THE UNIFIED SETTINGS WINDOW ---------------- */
+LRESULT CALLBACK SettingsWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+	switch (uMsg) {
+	case WM_CREATE: {
+		// 1. Thickness Label and Text Box
+		CreateWindowEx(0, L"STATIC", L"Outline Thickness:", WS_CHILD | WS_VISIBLE, 15, 18, 120, 20, hwnd, NULL, NULL, NULL);
+
+		std::wstring thickStr = std::to_wstring(g_outlineThickness);
+		thickStr = thickStr.substr(0, thickStr.find(L'.') + 2);
+
+		g_hThicknessEdit = CreateWindowEx(WS_EX_CLIENTEDGE, L"EDIT", thickStr.c_str(),
+			WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 140, 15, 80, 25, hwnd, NULL, NULL, NULL);
+
+		// 2. Color Buttons
+		CreateWindowEx(0, L"BUTTON", L"Change Outline Color", WS_CHILD | WS_VISIBLE, 15, 50, 205, 30, hwnd, (HMENU)2001, NULL, NULL);
+		CreateWindowEx(0, L"BUTTON", L"Change Text Color", WS_CHILD | WS_VISIBLE, 15, 90, 205, 30, hwnd, (HMENU)2002, NULL, NULL);
+		CreateWindowEx(0, L"BUTTON", L"Change Background Color", WS_CHILD | WS_VISIBLE, 15, 130, 205, 30, hwnd, (HMENU)2003, NULL, NULL);
+
+		// 3. NEW: Wireframe Toggle Button
+		CreateWindowEx(0, L"BUTTON", L"Toggle Wireframe Mode", WS_CHILD | WS_VISIBLE, 15, 170, 205, 30, hwnd, (HMENU)2005, NULL, NULL);
+
+		// 4. Save & Close Button (Pushed down to make room)
+		CreateWindowEx(0, L"BUTTON", L"Apply & Close", WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 15, 210, 205, 30, hwnd, (HMENU)2004, NULL, NULL);
+		return 0;
+	}
+	case WM_COMMAND: {
+		int btnID = LOWORD(wParam);
+		HWND parentHwnd = GetParent(hwnd);
+
+		if (btnID == 2001) {
+			if (OpenColorPicker(hwnd, g_outlineColor)) InvalidateRect(parentHwnd, NULL, FALSE);
+		}
+		else if (btnID == 2002) {
+			if (OpenColorPicker(hwnd, g_textColor)) {
+				pTextBrush->SetColor(g_textColor);
+				InvalidateRect(parentHwnd, NULL, FALSE);
+			}
+		}
+		else if (btnID == 2003) {
+			if (OpenColorPicker(hwnd, g_bgColor)) InvalidateRect(parentHwnd, NULL, FALSE);
+		}
+		else if (btnID == 2005) {
+			// Flip the wireframe switch instantly!
+			g_useWireframe = !g_useWireframe;
+			InvalidateRect(parentHwnd, NULL, FALSE);
+		}
+		else if (btnID == 2004) {
+			// Apply the typed thickness value
+			wchar_t buffer[32];
+			GetWindowText(g_hThicknessEdit, buffer, 32);
+			try {
+				float newValue = std::stof(std::wstring(buffer));
+				if (newValue >= 0.0f) g_outlineThickness = newValue;
+			}
+			catch (...) {}
+
+			InvalidateRect(parentHwnd, NULL, FALSE);
+			DestroyWindow(hwnd); // Close the settings window
+		}
+		return 0;
+	}
+	case WM_DESTROY:
+		g_hSettingsWnd = NULL; // Free the tracker
+		return 0;
+	}
+	return DefWindowProc(hwnd, uMsg, wParam, lParam);
+}
+
+/* ---------------- FUNCTION TO OPEN THE SETTINGS WINDOW ---------------- */
+void OpenSettingsWindow(HWND parentHwnd) {
+	if (g_hSettingsWnd != NULL) return;
+
+	WNDCLASSEX wc = { sizeof(WNDCLASSEX) };
+	wc.lpfnWndProc = SettingsWndProc;
+	wc.hInstance = GetModuleHandle(NULL);
+	wc.lpszClassName = L"SettingsPopupClass";
+	wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+	RegisterClassEx(&wc);
+
+	POINT pt;
+	GetCursorPos(&pt);
+
+	g_hSettingsWnd = CreateWindowEx(
+		WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+		L"SettingsPopupClass", L"Overlay Settings",
+		WS_POPUPWINDOW | WS_CAPTION,
+		pt.x, pt.y, 250, 290,
+		parentHwnd, NULL, wc.hInstance, NULL
+	);
+
+	ShowWindow(g_hSettingsWnd, SW_SHOWDEFAULT);
+}
+
+
+/* ---------------- FUNCTION TO PROCESS THE MAIN WINDOW PANEL ---------------- */
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 	switch (uMsg) {
 	case WM_DESTROY:
 		PostQuitMessage(0);
 		return 0;
 	case WM_PAINT:
 		RenderGraphics();
-		ValidateRect(hwnd, NULL); // Critical: Tells Windows the "dirt" is gone
+		ValidateRect(hwnd, NULL);
 		return 0;
 	case WM_ERASEBKGND:
-		return 1; // Tell Windows: "Don't erase! I'm handling it with Direct2D."
+		return 1;
 
-	case WM_ENTERSIZEMOVE: // triggered when the user clicks the window  border
+	case WM_CONTEXTMENU: {
+		HMENU hMenu = CreatePopupMenu();
+		InsertMenu(hMenu, 0, MF_BYPOSITION | MF_STRING, 1001, L"Settings");
+		InsertMenu(hMenu, 1, MF_BYPOSITION | MF_STRING, 1005, L"Exit App");
+
+		POINT pt;
+		GetCursorPos(&pt);
+
+		int menuID = TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.x, pt.y, 0, hwnd, NULL);
+		DestroyMenu(hMenu);
+
+		if (menuID == 1001) {
+			OpenSettingsWindow(hwnd);
+		}
+		else if (menuID == 1005) {
+			PostQuitMessage(0);
+		}
+		return 0;
+	}
+
+	case WM_ENTERSIZEMOVE:
 		g_isResizing = true;
 		InvalidateRect(hwnd, NULL, FALSE);
 		return 0;
 
-	case WM_EXITSIZEMOVE: // triggered when the user lets go off the window border
+	case WM_EXITSIZEMOVE:
 		g_isResizing = false;
 		if (pContext != NULL) {
 			ResizeGraphics(hwnd);
-			InvalidateRect(hwnd, NULL, FALSE); // force the screen to redraw
+			InvalidateRect(hwnd, NULL, FALSE);
 		}
 		return 0;
 
 	case WM_SIZE:
-		if (pContext != NULL && g_isResizing) {
+		if (pContext != NULL && !g_isResizing) {
 			ResizeGraphics(hwnd);
 			InvalidateRect(hwnd, NULL, FALSE);
 		}
+		return 0;
 
 	case WM_TIMER:
-		gBtnLabel = ""; // Clear the text
-		InvalidateRect(hwnd, NULL, FALSE); // Redraw the empty green screen
-		KillTimer(hwnd, 1); // Stop the timer so it doesn't loop
+		gBtnLabel = "";
+		InvalidateRect(hwnd, NULL, FALSE);
+		KillTimer(hwnd, 1);
 		return 0;
 	}
 
@@ -184,27 +324,24 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
 /* ---------------- FUNCTION TO REBUILD GRAPHICS WHEN WINDOW STRETCHES ---------------- */
 void ResizeGraphics(HWND hwnd) {
-	if (pContext == NULL || pSwapChain == NULL) return; // If the graphics isn't built yet, ignore and exit.
+	if (pContext == NULL || pSwapChain == NULL) return;
 
-	pContext->SetTarget(NULL); // Tells the graphic Engine to drop the current canvas
+	pContext->SetTarget(NULL);
 
-	// Get the new physical size of the window
 	RECT rc;
 	GetClientRect(hwnd, &rc);
 	UINT newWidth = rc.right - rc.left;
 	UINT newHeight = rc.bottom - rc.top;
-	std::cout << "hello";
 
-	if (newWidth == 0 || newHeight == 0) return; // prevents crashing if the windows is 0
+	if (newWidth == 0 || newHeight == 0) return;
 
 	float scaleX = (float)newWidth / 800.0f;
 	float scaleY = (float)newHeight / 250.0f;
 
-	gAppScale = std::min(scaleX, scaleY); // calculate new scale. 800 pixels is the default baseline.
+	gAppScale = std::min(scaleX, scaleY);
 
-	pSwapChain->ResizeBuffers(0, newWidth, newHeight, DXGI_FORMAT_UNKNOWN, 0); // resize the SwapChain to new pixel dimensions!
+	pSwapChain->ResizeBuffers(0, newWidth, newHeight, DXGI_FORMAT_UNKNOWN, 0);
 
-	// create new canvas at the exact pixel scale
 	IDXGISurface* pBackBuffer = NULL;
 	pSwapChain->GetBuffer(0, __uuidof(IDXGISurface), (void**)&pBackBuffer);
 
@@ -215,45 +352,37 @@ void ResizeGraphics(HWND hwnd) {
 
 	ID2D1Bitmap1* pNewTargetBitmap = NULL;
 	pContext->CreateBitmapFromDxgiSurface(pBackBuffer, &bitmapProperties, &pNewTargetBitmap);
-	
-	// Hook the canvas to the paint brush context
+
 	pContext->SetTarget(pNewTargetBitmap);
 
-	// Cleanup temporary pointers to avoid memory leaks
 	pNewTargetBitmap->Release();
 	pBackBuffer->Release();
-
-
 }
 
 HWND CreateOverlayWindow() {
-	WNDCLASSEX wc = { 0 }; // Fills the blueprint with empty zeros to start
+	WNDCLASSEX wc = { 0 };
 	wc.cbSize = sizeof(WNDCLASSEX);
-	wc.lpfnWndProc = WindowProc; // Connects the mailbox
-	wc.hInstance = GetModuleHandle(NULL); // Gets the ID of our .e
-	wc.lpszClassName = L"OverlayClass"; // The arbitrary name of our blueprint
-	RegisterClassEx(&wc); // Hands the blueprint to Windows
+	wc.lpfnWndProc = WindowProc;
+	wc.hInstance = GetModuleHandle(NULL);
+	wc.lpszClassName = L"OverlayClass";
+	RegisterClassEx(&wc);
 
 	HWND hwnd = CreateWindowEx(
-		0,        // Optional extension: Keeps the window always on top of other apps!
-		L"OverlayClass",      // MUST exactly match your blueprint name
-		L"Input Overlay",     // The text that will appear in the title bar
-		WS_OVERLAPPEDWINDOW,  // The style: This gives you the standard title bar, borders, and X button to drag and close!
-		CW_USEDEFAULT, CW_USEDEFAULT, // Starting X and Y position on the screen
-		800, 250,             // Width and Height of the window
+		0,
+		L"OverlayClass",
+		L"Input Overlay",
+		WS_OVERLAPPEDWINDOW,
+		CW_USEDEFAULT, CW_USEDEFAULT,
+		800, 250,
 		NULL, NULL, wc.hInstance, NULL
 	);
 
 	ShowWindow(hwnd, SW_SHOWDEFAULT);
 
 	return hwnd;
-
 }
 
-
-
 /* ---------------- FUNCTION TO LOAD THE SVG FILE FROM A GIVEN PATH ---------------- */
-
 ID2D1SvgDocument* LoadSVG(LPCWSTR filepath) {
 	ID2D1SvgDocument* tempDoc = NULL;
 	IStream* pStream = NULL;
@@ -274,13 +403,8 @@ ID2D1SvgDocument* LoadSVG(LPCWSTR filepath) {
 std::wstring ConvertUtf8ToWide(const std::string& str) {
 	if (str.empty()) return std::wstring();
 
-	// 1. Ask Windows how much space we need to translate this string
 	int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
-
-	// 2. Create a blank wide string of that exact size
 	std::wstring wstrTo(size_needed, 0);
-
-	// 3. Tell Windows to actually do the translation into our blank string
 	MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstrTo[0], size_needed);
 
 	return wstrTo;
@@ -299,112 +423,184 @@ std::vector<std::string> SplitCombo(std::string text) {
 
 
 /* ---------------- FUNCTION TO HANDLE THE SVG BUTTON PARAMETERS ---------------- */
-
 void DrawSVGKey(ID2D1SvgDocument* pDoc, std::string textToDraw, float xPos, float yPos, float width, float height, float fontSize, float scale) {
-	// Scale the buttons to the window context
 	xPos *= gAppScale;
 	yPos *= gAppScale;
 	width *= gAppScale;
 	height *= gAppScale;
 	fontSize *= gAppScale;
-	
-	// 1. Draw SVG (Only if one was provided!)
-	if (pDoc != NULL) {
-		// A. Create an invisible temporary canvas
-		ID2D1CommandList* pTempCanvas = NULL;
-		pContext->CreateCommandList(&pTempCanvas);
 
-		// B. Save the main screen, and switch our paintbrush to the temporary canvas
-		ID2D1Image* pMainScreen = NULL;
-		pContext->GetTarget(&pMainScreen);
-		pContext->SetTarget(pTempCanvas);
-		pContext->Clear(D2D1::ColorF(0, 0, 0, 0)); // Make the background fully transparent
+	// Detect if this key is a mouse action
+	bool isMouse = (pDoc == pSvgLClick || pDoc == pSvgRClick || pDoc == pSvgMClick || pDoc == pSvgScrUP || pDoc == pSvgScrDwn);
 
-		// C. Draw the SVG onto the temporary canvas
-		D2D1_MATRIX_3X2_F transform = D2D1::Matrix3x2F::Scale(scale * gAppScale, scale * gAppScale) * D2D1::Matrix3x2F::Translation(xPos, yPos);
-		pContext->SetTransform(transform);
-		pContext->DrawSvgDocument(pDoc);
-
-		// D. Close the canvas and switch back to the main screen
-		pTempCanvas->Close();
-		pContext->SetTarget(pMainScreen);
-		pMainScreen->Release();
-
-		// E. Feed our invisible canvas into the Shader, and draw the glow!
-		pShapeGlowEffect->SetInput(0, pTempCanvas);
-		pContext->SetTransform(D2D1::Matrix3x2F::Identity());
-		pContext->DrawImage(pShapeGlowEffect);
-
-		// F. Finally, draw the crisp, original SVG perfectly on top of the glow
-		pContext->SetTransform(transform);
-		pContext->DrawSvgDocument(pDoc);
-		pContext->SetTransform(D2D1::Matrix3x2F::Identity());
-
-		// G. Clean up the temporary canvas so we don't leak memory
-		pTempCanvas->Release();
-	}
-
-	// 2. Setup Fonts
 	IDWriteTextFormat* pMainFormat = NULL;
 	pDWriteFactory->CreateTextFormat(L"Arial", NULL, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
 		DWRITE_FONT_STRETCH_NORMAL, fontSize, L"en-us", &pMainFormat);
 	pMainFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
 	pMainFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
+	std::wstring wideText = L"";
+	std::wstring topPart = L"";
+	std::wstring bottomPart = L"";
+	IDWriteTextFormat* pSmallFormat = NULL;
+	D2D1_RECT_F topBox = { 0 }, bottomBox = { 0 }, textBox = { 0 };
+
 	size_t splitPos = textToDraw.find('\n');
+	bool isNumpad = (textToDraw.starts_with("NUMPAD") && splitPos != std::string::npos);
 
-	if (textToDraw.starts_with("NUMPAD") && splitPos != std::string::npos) {
-		// --- DUAL TEXT MODE ---
-		std::wstring topPart = ConvertUtf8ToWide(textToDraw.substr(0, splitPos));
-		std::wstring bottomPart = ConvertUtf8ToWide(textToDraw.substr(splitPos + 1));
-
-		IDWriteTextFormat* pSmallFormat = NULL;
+	if (isNumpad) {
+		topPart = ConvertUtf8ToWide(textToDraw.substr(0, splitPos));
+		bottomPart = ConvertUtf8ToWide(textToDraw.substr(splitPos + 1));
 		pDWriteFactory->CreateTextFormat(L"Arial", NULL, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
 			DWRITE_FONT_STRETCH_NORMAL, fontSize * 0.4f, L"en-us", &pSmallFormat);
 		pSmallFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
 		pSmallFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+		topBox = D2D1::RectF(xPos, yPos, xPos + width, yPos + (height * 0.45f));
+		bottomBox = D2D1::RectF(xPos, yPos - 10.0f + (height * 0.35f), xPos + width, yPos + height);
+	}
+	else if (!textToDraw.empty()) {
+		wideText = ConvertUtf8ToWide(textToDraw);
+		textBox = D2D1::RectF(xPos, yPos, xPos + width, yPos + height);
+	}
 
-		D2D1_RECT_F topBox = D2D1::RectF(xPos, yPos, xPos + (width * scale), yPos + (height * scale * 0.45f));
-		D2D1_RECT_F bottomBox = D2D1::RectF(xPos, yPos - 10.0f + (height * scale * 0.35f), xPos + (width * scale), yPos + (height * scale));
+	// NORMAL WIREFRAME (For Keyboards)
+	D2D1_ROUNDED_RECT wireframeBox = D2D1::RoundedRect(
+		D2D1::RectF(xPos, yPos, xPos + width, yPos + height),
+		8.0f * gAppScale, 8.0f * gAppScale
+	);
 
-		float glowSpread = 1.5f;
-		for (int x = -2; x <= 2; x++) {
-			for (int y = -2; y <= 2; y++) {
-				if (x == 0 && y == 0) continue;
-				D2D1_RECT_F gTopBox = D2D1::RectF(topBox.left + (x * glowSpread), topBox.top + (y * glowSpread), topBox.right + (x * glowSpread), topBox.bottom + (y * glowSpread));
-				D2D1_RECT_F gBotBox = D2D1::RectF(bottomBox.left + (x * glowSpread), bottomBox.top + (y * glowSpread), bottomBox.right + (x * glowSpread), bottomBox.bottom + (y * glowSpread));
+	// HELPER LOGIC TO BUILD THE CUSTOM MOUSE WIREFRAME
+	auto DrawMouseWireframe = [&](ID2D1SolidColorBrush* brush, float stroke) {
+		float mw = 55.0f * gAppScale; // Mouse Width
+		float mh = 90.0f * gAppScale; // Mouse Height
+		float mx = xPos + (width - mw) / 2.0f; // Centers the mouse dynamically
+		float my = yPos;
+		float cx = mx + mw / 2.0f; // Center X
 
-				pContext->DrawTextW(topPart.c_str(), topPart.length(), pSmallFormat, gTopBox, pGlowBrush);
-				pContext->DrawTextW(bottomPart.c_str(), bottomPart.length(), pMainFormat, gBotBox, pGlowBrush);
-			}
+		// 1. Draw Mouse Body
+		D2D1_ROUNDED_RECT mouseBody = D2D1::RoundedRect(D2D1::RectF(mx, my, mx + mw, my + mh), 25.0f * gAppScale, 25.0f * gAppScale);
+
+		// 3. Draw Hollow Scroll Wheel
+		float divY = my + mh * 0.45f; // Horizontal Line separating buttons from body
+		D2D1_ROUNDED_RECT wheel = D2D1::RoundedRect(D2D1::RectF(cx - 8.0f * gAppScale, my + 6.0f * gAppScale, cx + 8.0f * gAppScale, divY - 6.0f * gAppScale), 3.0f * gAppScale, 3.0f * gAppScale);
+		pContext->DrawRoundedRectangle(wheel, brush, stroke * 0.4f);
+
+		// 4. Handle Filling
+		if (pDoc == pSvgLClick) {
+			pContext->PushAxisAlignedClip(D2D1::RectF(mx, my, cx, wheel.rect.top), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+			pContext->FillRoundedRectangle(mouseBody, brush);
+			pContext->PopAxisAlignedClip();
+
+			pContext->PushAxisAlignedClip(D2D1::RectF(mx, wheel.rect.top, wheel.rect.left, divY), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+			pContext->FillRoundedRectangle(mouseBody, brush);
+			pContext->PopAxisAlignedClip();
+		}
+		else if (pDoc == pSvgRClick) {
+			pContext->PushAxisAlignedClip(D2D1::RectF(cx, my, mx + mw, wheel.rect.top), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+			pContext->FillRoundedRectangle(mouseBody, brush);
+			pContext->PopAxisAlignedClip();
+
+			pContext->PushAxisAlignedClip(D2D1::RectF(wheel.rect.right, wheel.rect.top, mx + mw, divY), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+			pContext->FillRoundedRectangle(mouseBody, brush);
+			pContext->PopAxisAlignedClip();
 		}
 
+		// 5. Fill Middle Click Wheel Solidly
+		if (pDoc == pSvgMClick) {
+			pContext->FillRoundedRectangle(wheel, brush);
+		}
+
+		// 6. Draw the outlines and dividers
+		pContext->DrawRoundedRectangle(mouseBody, brush, stroke);
+
+		pContext->DrawLine(D2D1::Point2F(mx, divY), D2D1::Point2F(cx, divY), brush, stroke); // Left segment
+		pContext->DrawLine(D2D1::Point2F(cx, divY), D2D1::Point2F(mx + mw, divY), brush, stroke); // Right segment
+
+		// 7. Handle Scrolling Arrows
+		if (pDoc == pSvgScrUP) {
+			float baseY = my;
+			float tipY = my - 22.0f * gAppScale;
+			pContext->DrawLine(D2D1::Point2F(cx, baseY), D2D1::Point2F(cx, tipY), brush, stroke);
+			pContext->DrawLine(D2D1::Point2F(cx - 8.0f * gAppScale, tipY + 8.0f * gAppScale), D2D1::Point2F(cx, tipY), brush, stroke);
+			pContext->DrawLine(D2D1::Point2F(cx + 8.0f * gAppScale, tipY + 8.0f * gAppScale), D2D1::Point2F(cx, tipY), brush, stroke);
+		}
+		else if (pDoc == pSvgScrDwn) {
+			float baseY = divY;
+			float tipY = divY + 28.0f * gAppScale;
+			pContext->DrawLine(D2D1::Point2F(cx, baseY), D2D1::Point2F(cx, tipY), brush, stroke);
+			pContext->DrawLine(D2D1::Point2F(cx - 8.0f * gAppScale, tipY - 8.0f * gAppScale), D2D1::Point2F(cx, tipY), brush, stroke);
+			pContext->DrawLine(D2D1::Point2F(cx + 8.0f * gAppScale, tipY - 8.0f * gAppScale), D2D1::Point2F(cx, tipY), brush, stroke);
+		}
+		};
+
+	ID2D1CommandList* pTempCanvas = NULL;
+	pContext->CreateCommandList(&pTempCanvas);
+	ID2D1Image* pMainScreen = NULL;
+	pContext->GetTarget(&pMainScreen);
+	pContext->SetTarget(pTempCanvas);
+	pContext->Clear(D2D1::ColorF(0, 0, 0, 0));
+
+	D2D1_MATRIX_3X2_F transform = D2D1::Matrix3x2F::Scale(scale * gAppScale, scale * gAppScale) * D2D1::Matrix3x2F::Translation(xPos, yPos);
+
+	// 3. DRAW TO STENCIL (Wireframe OR Svg)
+	if (pDoc != NULL) {
+		if (g_useWireframe) {
+			if (isMouse) DrawMouseWireframe(pGlowBrush, 4.0f * gAppScale);
+			else pContext->DrawRoundedRectangle(wireframeBox, pGlowBrush, 4.0f * gAppScale);
+		}
+		else {
+			pContext->SetTransform(transform);
+			pContext->DrawSvgDocument(pDoc);
+			pContext->SetTransform(D2D1::Matrix3x2F::Identity());
+		}
+	}
+
+	pTempCanvas->Close();
+	pContext->SetTarget(pMainScreen);
+	pMainScreen->Release();
+
+	// 4. APPLY THE OUTLINE
+	float svgMultiplier = 4.0f; // Change this value for thinner/thicker outline for the svgs
+	float finalThickness = g_useWireframe ? g_outlineThickness : (g_outlineThickness * svgMultiplier);
+
+	pDilateEffect->SetInput(0, pTempCanvas);
+	pDilateEffect->SetValue(D2D1_MORPHOLOGY_PROP_WIDTH, (UINT32)finalThickness);
+	pDilateEffect->SetValue(D2D1_MORPHOLOGY_PROP_HEIGHT, (UINT32)finalThickness);
+
+	D2D1_MATRIX_5X4_F matrix = D2D1::Matrix5x4F(
+		0, 0, 0, 0,
+		0, 0, 0, 0,
+		0, 0, 0, 0,
+		0, 0, 0, 1,
+		g_outlineColor.r, g_outlineColor.g, g_outlineColor.b, 0
+	);
+	pColorEffect->SetInputEffect(0, pDilateEffect);
+	pColorEffect->SetValue(D2D1_COLORMATRIX_PROP_COLOR_MATRIX, matrix);
+
+	pContext->SetTransform(D2D1::Matrix3x2F::Identity());
+	pContext->DrawImage(pColorEffect);
+
+	// 5. DRAW CRISP INSIDES (Wireframe OR Svg)
+	if (pDoc != NULL) {
+		if (!g_useWireframe) {
+			pContext->SetTransform(transform);
+			pContext->DrawSvgDocument(pDoc);
+			pContext->SetTransform(D2D1::Matrix3x2F::Identity());
+		}
+	}
+
+	// 6. DRAW THE TEXT ON TOP
+	if (isNumpad) {
 		pContext->DrawTextW(topPart.c_str(), topPart.length(), pSmallFormat, topBox, pTextBrush);
 		pContext->DrawTextW(bottomPart.c_str(), bottomPart.length(), pMainFormat, bottomBox, pTextBrush);
-
 		pSmallFormat->Release();
 	}
 	else if (!textToDraw.empty()) {
-		// --- NORMAL TEXT MODE ---
-		std::wstring wideText = ConvertUtf8ToWide(textToDraw);
-		D2D1_RECT_F textBox = D2D1::RectF(xPos, yPos, xPos + (width * scale), yPos + (height * scale));
-
-		float glowSpread = 1.5f;
-		for (int x = -2; x <= 2; x++) {
-			for (int y = -2; y <= 2; y++) {
-				if (x == 0 && y == 0) continue;
-				D2D1_RECT_F glowBox = D2D1::RectF(
-					textBox.left + (x * glowSpread), textBox.top + (y * glowSpread),
-					textBox.right + (x * glowSpread), textBox.bottom + (y * glowSpread)
-				);
-
-				pContext->DrawTextW(wideText.c_str(), wideText.length(), pMainFormat, glowBox, pGlowBrush);
-			}
-		}
 		pContext->DrawTextW(wideText.c_str(), wideText.length(), pMainFormat, textBox, pTextBrush);
 	}
 
 	pMainFormat->Release();
+	pTempCanvas->Release();
 }
 
 
@@ -412,120 +608,112 @@ void DrawSVGKey(ID2D1SvgDocument* pDoc, std::string textToDraw, float xPos, floa
 void RenderGraphics() {
 	if (pContext == NULL) return;
 	pContext->BeginDraw();
-	pContext->Clear(D2D1::ColorF(0.1f, 1.0f, 0.1f));
+	pContext->Clear(g_bgColor);
 
-
-	if (!gBtnLabel.empty() && !g_isResizing) { // only draw the keys if the buttons is pressed AND we are not currently dragging the window
-		// 1. Slice the label into pieces!
+	if (!gBtnLabel.empty() && !g_isResizing) {
 		std::vector<std::string> keys = SplitCombo(gBtnLabel);
 
-		// 2. Set our starting position
 		float PosX = 50.0f;
 		float PosY = 50.0f;
 
-		// 3. Loop through each piece
 		for (size_t i = 0; i < keys.size(); i++) {
 			std::string currentKey = keys[i];
-			float keyWidth = 90.0f; // default width assumption
-			float keyHeight = 90.0f; // default height assumption
+			float keyWidth = 90.0f;
+			float keyHeight = 90.0f;
+			float drawY = PosY; // FIX: Create a temporary Y so we don't break the row!
 
 			if (currentKey == "SPACE") {
 				keyWidth = 400.0f;
-				DrawSVGKey(pSvgSpace, currentKey, PosX, PosY, keyWidth, keyHeight, 42.0f, 1.0f);
+				DrawSVGKey(pSvgSpace, currentKey, PosX, drawY, keyWidth, keyHeight, 42.0f, 1.0f);
 			}
 			else if (currentKey == "ENTER") {
 				keyWidth = 200.0f;
-				DrawSVGKey(pSvgEnter, currentKey, PosX, PosY, keyWidth, keyHeight, 42.0f, 1.0f);
+				DrawSVGKey(pSvgEnter, currentKey, PosX, drawY, keyWidth, keyHeight, 42.0f, 1.0f);
 			}
 			else if (currentKey == "←") {
 				keyWidth = 170.0f;
-				DrawSVGKey(pSvgBackSpace, currentKey, PosX, PosY, keyWidth, keyHeight, 60.0f, 1.0f);
+				DrawSVGKey(pSvgBackSpace, currentKey, PosX, drawY, keyWidth, keyHeight, 60.0f, 1.0f);
 			}
 			else if (currentKey == "CAPS") {
 				keyWidth = 140.0f;
-				DrawSVGKey(pSvgCaps, currentKey, PosX, PosY, keyWidth, keyHeight, 38.0f, 1.0f);
+				DrawSVGKey(pSvgCaps, currentKey, PosX, drawY, keyWidth, keyHeight, 38.0f, 1.0f);
 			}
 			else if (currentKey == "TAB") {
 				keyWidth = 120.0f;
-				DrawSVGKey(pSvgTab, currentKey, PosX, PosY, keyWidth, keyHeight, 42.0f, 1.0f);
+				DrawSVGKey(pSvgTab, currentKey, PosX, drawY, keyWidth, keyHeight, 42.0f, 1.0f);
 			}
 			else if (currentKey == "SHIFT" || currentKey == "RIGHT\nSHIFT" || currentKey == "LEFT\nSHIFT") {
 				keyWidth = 210.0f;
-				DrawSVGKey(pSvgShift, currentKey, PosX, PosY, keyWidth, keyHeight, 28.0f, 1.0f);
+				DrawSVGKey(pSvgShift, currentKey, PosX, drawY, keyWidth, keyHeight, 28.0f, 1.0f);
 			}
 			else if (currentKey == "CTRL" || currentKey == "RIGHT\nCTRL" || currentKey == "LEFT\nCTRL") {
 				keyWidth = 90.0f;
-				DrawSVGKey(pSvgNormal, currentKey, PosX, PosY, keyWidth, keyHeight, 24.0f, 1.0f);
+				DrawSVGKey(pSvgNormal, currentKey, PosX, drawY, keyWidth, keyHeight, 24.0f, 1.0f);
 			}
 			else if (currentKey == "ALT" || currentKey == "RIGHT\nALT" || currentKey == "LEFT\nALT") {
 				keyWidth = 90.0f;
-				DrawSVGKey(pSvgNormal, currentKey, PosX, PosY, keyWidth, keyHeight, 24.0f, 1.0f);
+				DrawSVGKey(pSvgNormal, currentKey, PosX, drawY, keyWidth, keyHeight, 24.0f, 1.0f);
 			}
 			else if (currentKey == "PAGE\nUP" || currentKey == "PAGE\nDOWN") {
-				DrawSVGKey(pSvgNormal, currentKey, PosX, PosY, keyWidth, keyHeight, 18.0f, 1.0f);
+				DrawSVGKey(pSvgNormal, currentKey, PosX, drawY, keyWidth, keyHeight, 18.0f, 1.0f);
 			}
 			else if (currentKey == "PAUSE" || currentKey == "HOME") {
-				DrawSVGKey(pSvgNormal, currentKey, PosX, PosY, keyWidth, keyHeight, 20.0f, 1.0f);
+				DrawSVGKey(pSvgNormal, currentKey, PosX, drawY, keyWidth, keyHeight, 20.0f, 1.0f);
 			}
 			else if (currentKey == "ESC" || currentKey == "END" || currentKey == "INS" || currentKey == "DEL") {
-				DrawSVGKey(pSvgNormal, currentKey, PosX, PosY, keyWidth, keyHeight, 28.0f, 1.0f);
+				DrawSVGKey(pSvgNormal, currentKey, PosX, drawY, keyWidth, keyHeight, 28.0f, 1.0f);
 			}
 			else if (currentKey == "PRT\nSCR" || currentKey == "SCR\nLK") {
-				DrawSVGKey(pSvgNormal, currentKey, PosX, PosY, keyWidth, keyHeight, 24.0f, 1.0f);
+				DrawSVGKey(pSvgNormal, currentKey, PosX, drawY, keyWidth, keyHeight, 24.0f, 1.0f);
 			}
 			else if (currentKey.length() > 1 && currentKey[0] == 'F' && isdigit(currentKey[1])) {
-				DrawSVGKey(pSvgNormal, currentKey, PosX, PosY, keyWidth, keyHeight, 38.0f, 1.0f);
+				DrawSVGKey(pSvgNormal, currentKey, PosX, drawY, keyWidth, keyHeight, 38.0f, 1.0f);
 			}
 			else if (currentKey.starts_with("NUMPAD")) {
-				DrawSVGKey(pSvgNormal, currentKey, PosX, PosY, keyWidth, keyHeight, 42.0f, 1.0f);
+				DrawSVGKey(pSvgNormal, currentKey, PosX, drawY, keyWidth, keyHeight, 42.0f, 1.0f);
 			}
+			// --- MOUSE BUTTONS FIX ---
 			else if (currentKey == "RIGHT CLICK") {
-				keyWidth = 180.0f;
-				PosY = 5.0f;
-				DrawSVGKey(pSvgRClick, "", PosX, PosY, keyWidth, keyHeight, 42.0f, 2.0f);
+				keyWidth = g_useWireframe ? 80.0f : 180.0f; // Shrink the box if text is hidden
+				if (!g_useWireframe) drawY = 50.0f; // Only shift SVGs up!
+				DrawSVGKey(pSvgRClick, "", PosX, drawY, keyWidth, keyHeight, 42.0f, 1.0f);
 			}
 			else if (currentKey == "LEFT CLICK") {
-				keyWidth = 180.0f;
-				PosY = 5.0f;
-				// Pass an empty string "" so no text is drawn!
-				DrawSVGKey(pSvgLClick, "", PosX, PosY, keyWidth, 90.0f, 42.0f, 2.0f);
+				keyWidth = g_useWireframe ? 80.0f : 180.0f;
+				if (!g_useWireframe) drawY = 50.0f;
+				DrawSVGKey(pSvgLClick, "", PosX, drawY, keyWidth, 90.0f, 42.0f, 1.0f);
 			}
-			else if (currentKey == "SHIFT" || currentKey == "RIGHT\nSHIFT" || currentKey == "LEFT\nSHIFT" || currentKey == "CTRL" || currentKey == "MIDDLE CLICK") {
-				keyWidth = 180.0f;
-				PosY = 5.0f;
-				DrawSVGKey(pSvgMClick, "", PosX, PosY, keyWidth, 90.0f, 42.0f, 2.0f);
+			else if (currentKey == "MIDDLE CLICK") {
+				keyWidth = g_useWireframe ? 80.0f : 180.0f;
+				if (!g_useWireframe) drawY = 50.0f;
+				DrawSVGKey(pSvgMClick, "", PosX, drawY, keyWidth, 90.0f, 42.0f, 1.0f);
 			}
 			else if (currentKey == "SCROLL UP") {
-				keyWidth = 180.0f;
-				PosY = 5.0f;
-				DrawSVGKey(pSvgScrUP, "", PosX, PosY, keyWidth, keyHeight, 42.0f, 2.0f);
+				keyWidth = g_useWireframe ? 80.0f : 180.0f;
+				if (!g_useWireframe) drawY = 50.0f;
+				DrawSVGKey(pSvgScrUP, "", PosX, drawY, keyWidth, keyHeight, 42.0f, 1.0f);
 			}
 			else if (currentKey == "SCROLL DOWN") {
-				keyWidth = 180.0f;
-				PosY = 5.0f;
-				DrawSVGKey(pSvgScrDwn, "", PosX, PosY, keyWidth, keyHeight, 42.0f, 2.0f);
+				keyWidth = g_useWireframe ? 80.0f : 180.0f;
+				if (!g_useWireframe) drawY = 50.0f;
+				DrawSVGKey(pSvgScrDwn, "", PosX, drawY, keyWidth, keyHeight, 42.0f, 1.0f);
 			}
 			else {
-				// Normal letters and default
-				DrawSVGKey(pSvgNormal, currentKey, PosX, PosY, keyWidth, keyHeight, 42.0f, 1.0f);
+				DrawSVGKey(pSvgNormal, currentKey, PosX, drawY, keyWidth, keyHeight, 42.0f, 1.0f);
 			}
 
-			// Advance the cursor to the right!
 			PosX += keyWidth + 15.0f;
 
 			if (i < keys.size() - 1) {
 				keyWidth = 30.0f;
-				// Pass NULL for the SVG so it only draws text!
+				// Always pass the base PosY so the plus sign stays centered vertically
 				DrawSVGKey(NULL, "+", PosX, PosY, keyWidth, keyHeight, 42.0f, 1.0f);
-
-				// Advance the cursor past the "+" sign
 				PosX += 30.0f + 15.0f;
 			}
 		}
 	}
-	
-	pContext->SetTransform(D2D1::Matrix3x2F::Identity());
 
+	pContext->SetTransform(D2D1::Matrix3x2F::Identity());
 	pContext->EndDraw();
 	pSwapChain->Present(1, 0);
 }
